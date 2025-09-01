@@ -1,0 +1,14 @@
+# Development dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest==8.4.1
+pytest-asyncio==1.1.0
+
+# Code quality
+black
+flake8
+mypy
+
+# Development tools
+pre-commit

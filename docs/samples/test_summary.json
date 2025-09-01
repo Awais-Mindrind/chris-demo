@@ -1,0 +1,38 @@
+{
+  "total_tests": 6,
+  "passed_tests": 6,
+  "failed_tests": 0,
+  "success_rate": "100.0%",
+  "results": {
+    "healthz": {
+      "success": true,
+      "status": 200
+    },
+    "create_quote": {
+      "success": true,
+      "status": 200,
+      "quote_id": 2
+    },
+    "get_quote": {
+      "success": true,
+      "status": 200,
+      "quote_id": 2
+    },
+    "get_quote_pdf": {
+      "success": true,
+      "status": 200,
+      "content_type": "application/pdf",
+      "size_bytes": 4248
+    },
+    "chat": {
+      "success": true,
+      "status": 200
+    },
+    "chat_stream": {
+      "success": true,
+      "status": 200,
+      "token_count": 1,
+      "done_received": true
+    }
+  }
+}

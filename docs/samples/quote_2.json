@@ -1,0 +1,26 @@
+{
+  "quote_id": 2,
+  "account_id": 1,
+  "pricebook_id": 1,
+  "status": "draft",
+  "created_at": "2025-09-01T09:06:23",
+  "lines": [
+    {
+      "id": 2,
+      "sku_id": 7,
+      "qty": 10,
+      "unit_price": 10.0,
+      "discount_pct": 0.0,
+      "line_total": 100.0
+    },
+    {
+      "id": 3,
+      "sku_id": 8,
+      "qty": 10,
+      "unit_price": 10.0,
+      "discount_pct": 0.1,
+      "line_total": 90.0
+    }
+  ],
+  "total_amount": 190.0
+}

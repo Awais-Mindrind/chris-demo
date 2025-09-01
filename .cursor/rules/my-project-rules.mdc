@@ -1,0 +1,125 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Project: Demo 1 — Quote Creation Agent
+# Purpose / Description:
+This project is part of an AI/ML Engineer technical case study:contentReference[oaicite:0]{index=0}. 
+The company is building a Sales Quoting Engine (Product 0 → 1). 
+The goal is to demo an AI agent that helps end users create sales quotes. 
+
+The demo flow:
+1. User interacts with the agent via chat (voice path is planned for later).
+2. Agent asks clarifying questions (account, pricebook, SKUs, qty).
+3. Agent creates a placeholder quote in the system (SQLite DB).
+4. Agent generates and returns a PDF document for review.
+5. Agent asks user to confirm/review the quote.
+
+The backend data has realistic challenges:contentReference[oaicite:1]{index=1}:
+- Product SKUs with parent/child relationships (catalogs) and multiple pricebooks.
+- Company accounts may be duplicated or similar in name.
+- Opportunities/deals exist in different stages.
+
+Prepare to discuss:
+- How the agent handles data challenges with minimal hallucinations.
+- Error-handling & reliability for high success rate.
+- How to evolve from a generative → agentic AI agent.
+- Security & compliance (GDPR, SOC2, etc.):contentReference[oaicite:2]{index=2}.
+
+# Tech Stack:
+- Python 3.11+
+- uv (package/env manager)
+- FastAPI + Uvicorn
+- LangChain + Google Gen AI (Gemini) as LLM
+- SQLAlchemy (ORM) + Alembic (migrations)
+- Pydantic (schemas & validation)
+- ReportLab (PDF generation)
+- SSE (Server-Sent Events streaming)
+- Optional future: Google Cloud STT/TTS for voice path
+
+---
+
+## Architecture
+/app
+  main.py            # FastAPI app, routes, SSE
+  agent.py           # LangChain agent config & system prompt
+  tools.py           # LangChain Tools (DB + PDF)
+  db.py              # SQLAlchemy engine/session
+  models.py          # SQLAlchemy Declarative models
+  crud.py            # DB access functions
+  schemas.py         # Pydantic models
+  pdf.py             # ReportLab quote renderer
+  config.py          # settings (env, model names, toggles)
+  logging_conf.py    # structured logging
+alembic/             # migrations
+public/              # optional served PDFs
+tests/               # unit/integration
+.env.example
+
+## Required Endpoints
+- POST /chat (SSE stream of tokens, final message includes pdf_url)
+- POST /actions/create_quote (idempotent, idempotency_key supported)
+- GET /quotes/{quote_id}
+- GET /quotes/{quote_id}/pdf
+- GET /healthz
+
+## LangChain Tools (must exist)
+- find_account(query: str) -> {candidates:[{account_id,name,score}]}
+- list_pricebooks() -> [{id,name,currency,is_default}]
+- list_skus(filters:{name?:str,code?:str,attributes?:dict}) -> [SKU…]
+- create_quote(account_id,pricebook_id,lines:[{sku_id,qty,unit_price?,discount_pct?}],idempotency_key?) -> {quote_id}
+- get_quote(quote_id) -> {...}
+- render_quote_pdf(quote_id) -> {pdf_url}
+
+## Guardrails
+- Mutations only via tools. No free-text quote creation.
+- Validate: qty>=1, discount_pct∈[0,1), FK existence.
+- Never auto-pick account if confidence<0.9; ask user.
+
+## Environment & Tooling
+- Use uv for deps: `uv add ...`
+- Run server: `uv run uvicorn app.main:app --reload`
+- Alembic: `uvx alembic upgrade head`
+- Deps: fastapi uvicorn pydantic pydantic-settings, sqlalchemy alembic,
+        langchain langchain-google-genai, reportlab, sse-starlette
+- .env.example must define GOOGLE_API_KEY, APP_ENV, DB_URL (sqlite:///./dev.db), LOG_LEVEL
+
+## Data Model (SQLAlchemy)
+- Account(id,name,domain,external_crm_ids JSON,confidence_score Float)
+- Pricebook(id,name,currency,is_default Bool)
+- Sku(id,parent_sku_id FK?,code,name,attributes JSON,pricebook_id FK,unit_price DECIMAL)
+- Quote(id,account_id FK,pricebook_id FK,status Enum[draft,sent,accepted],created_at UTC)
+- QuoteLine(id,quote_id FK,sku_id FK,qty Int>=1,unit_price DECIMAL,discount_pct Float=0)
+- Relationships: Account→Quote, Pricebook→Sku/Quote, Quote→QuoteLine, Sku self-ref parent/child
+
+## Agent Config
+- LLM: ChatGoogleGenerativeAI, temperature 0.2–0.4
+- Prompt: 
+  "You are a quoting assistant. Ask the minimum clarifying questions. 
+   Never invent IDs or prices. Use tools for all data reads/writes. 
+   If multiple accounts match, ask the user to choose. 
+   When ready, create the quote, render a PDF, and ask for review."
+- Memory: in-memory per session_id
+- Self-check: after create_quote, run get_quote to verify totals
+
+## Streaming & UX
+- /chat uses SSE: `event: token`, `data: "<text>"`, final `event: done` with pdf_url
+- Provide minimal HTML test page under /public
+
+## Reliability, Logging, Security
+- create_quote: idempotency_key required
+- Retry idempotent reads with jittered backoff
+- Logs: trace_id, tool, latency, status
+- Never log secrets. Minimize LLM input.
+
+## PDF Contract
+- ReportLab PDF includes: header, bill-to, line table, totals, footer
+- GET /quotes/{id}/pdf returns application/pdf
+
+## Definition of Done
+- Server runs: `uv run uvicorn app.main:app --reload`
+- Tests exist: CRUD + happy-path integration
+- Manual validation checklist in PR note
+- Alembic migration included if models changed
+- .env.example updated if vars changed

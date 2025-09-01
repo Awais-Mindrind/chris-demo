@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sales Quoting Engine - Test Page</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .endpoint {
+        margin: 20px 0;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+      }
+      .endpoint h3 {
+        margin-top: 0;
+        color: #333;
+      }
+      button {
+        padding: 10px 15px;
+        margin: 5px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      .response {
+        margin-top: 10px;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 3px;
+        white-space: pre-wrap;
+      }
+      .error {
+        background: #f8d7da;
+        color: #721c24;
+      }
+      .success {
+        background: #d4edda;
+        color: #155724;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Sales Quoting Engine - API Test Page</h1>
+    <p>Use this page to test the API endpoints during development.</p>
+
+    <div class="endpoint">
+      <h3>Health Check</h3>
+      <button onclick="testHealth()">Test /healthz</button>
+      <div id="health-response" class="response"></div>
+    </div>
+
+    <div class="endpoint">
+      <h3>Chat Endpoint</h3>
+      <button onclick="testChat()">Test /chat</button>
+      <div id="chat-response" class="response"></div>
+    </div>
+
+    <div class="endpoint">
+      <h3>Create Quote</h3>
+      <button onclick="testCreateQuote()">Test /actions/create_quote</button>
+      <div id="create-quote-response" class="response"></div>
+    </div>
+
+    <div class="endpoint">
+      <h3>Get Quote</h3>
+      <button onclick="testGetQuote()">Test /quotes/{id}</button>
+      <div id="get-quote-response" class="response"></div>
+    </div>
+
+    <div class="endpoint">
+      <h3>Get Quote PDF</h3>
+      <button onclick="testGetQuotePdf()">Test /quotes/{id}/pdf</button>
+      <div id="get-pdf-response" class="response"></div>
+    </div>
+
+    <script>
+      const baseUrl = "http://localhost:8000";
+
+      function showResponse(elementId, data, isError = false) {
+        const element = document.getElementById(elementId);
+        element.textContent = JSON.stringify(data, null, 2);
+        element.className = `response ${isError ? "error" : "success"}`;
+      }
+
+      async function testHealth() {
+        try {
+          const response = await fetch(`${baseUrl}/healthz`);
+          const data = await response.json();
+          showResponse("health-response", data, !response.ok);
+        } catch (error) {
+          showResponse("health-response", { error: error.message }, true);
+        }
+      }
+
+      async function testChat() {
+        try {
+          const response = await fetch(`${baseUrl}/chat`, { method: "POST" });
+          const data = await response.json();
+          showResponse("chat-response", data, !response.ok);
+        } catch (error) {
+          showResponse("chat-response", { error: error.message }, true);
+        }
+      }
+
+      async function testCreateQuote() {
+        try {
+          const response = await fetch(`${baseUrl}/actions/create_quote`, {
+            method: "POST",
+          });
+          const data = await response.json();
+          showResponse("create-quote-response", data, !response.ok);
+        } catch (error) {
+          showResponse("create-quote-response", { error: error.message }, true);
+        }
+      }
+
+      async function testGetQuote() {
+        try {
+          const response = await fetch(`${baseUrl}/quotes/test-id`);
+          const data = await response.json();
+          showResponse("get-quote-response", data, !response.ok);
+        } catch (error) {
+          showResponse("get-quote-response", { error: error.message }, true);
+        }
+      }
+
+      async function testGetQuotePdf() {
+        try {
+          const response = await fetch(`${baseUrl}/quotes/test-id/pdf`);
+          const data = await response.json();
+          showResponse("get-pdf-response", data, !response.ok);
+        } catch (error) {
+          showResponse("get-pdf-response", { error: error.message }, true);
+        }
+      }
+    </script>
+  </body>
+</html>

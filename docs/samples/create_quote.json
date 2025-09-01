@@ -1,0 +1,24 @@
+{
+  "request": {
+    "account_id": 1,
+    "pricebook_id": 1,
+    "lines": [
+      {
+        "sku_id": 7,
+        "qty": 10
+      },
+      {
+        "sku_id": 8,
+        "qty": 10,
+        "discount_pct": 0.1
+      }
+    ],
+    "idempotency_key": "test-1756717583"
+  },
+  "response": {
+    "quote_id": 2,
+    "status": "draft",
+    "message": "Quote created successfully with ID 2"
+  },
+  "status_code": 200
+}

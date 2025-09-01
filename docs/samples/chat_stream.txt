@@ -1,0 +1,6 @@
+event: session
+data: {"session_id": "stream-test-1756717586"}
+event: token
+data: {"chunk": "I cannot create a quote for Acme Ltd. because I could not find any account matching that name.  Please provide a different account name or create the account first.\n", "partial": "I cannot create a quote for Acme Ltd. because I could not find any account matching that name.  Please provide a different account name or create the account first.\n"}
+event: done
+data: {"response": "I cannot create a quote for Acme Ltd. because I could not find any account matching that name.  Please provide a different account name or create the account first.\n", "session_id": "stream-test-1756717586"}

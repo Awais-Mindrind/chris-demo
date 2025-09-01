@@ -1,0 +1,11 @@
+{
+  "request": {
+    "message": "Create a quote for Acme for 10 Widgets",
+    "session_id": "test-1756717583"
+  },
+  "response": {
+    "response": "I cannot find an account called Acme. Please provide the correct account name or domain.\n",
+    "session_id": "test-1756717583"
+  },
+  "status_code": 200
+}
