@@ -216,7 +216,7 @@
         currentMessage = "";
 
         // Create EventSource
-        const url = "/chat/stream";
+        const url = "/chat";
         eventSource = new EventSource(url, {
           method: "POST",
           headers: {
@@ -226,7 +226,7 @@
         });
 
         // Send the actual request
-        fetch("/chat/stream", {
+        fetch("/chat", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

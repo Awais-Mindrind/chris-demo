@@ -240,7 +240,7 @@ class APITester:
             
     def test_chat_stream(self) -> bool:
         """Test chat streaming endpoint."""
-        print("🌊 Testing POST /chat/stream")
+        print("🌊 Testing POST /chat")
         try:
             payload = {
                 "message": "Create a quote for Acme Ltd for 5 Widget",
@@ -248,7 +248,7 @@ class APITester:
             }
             
             response = self.session.post(
-                f"{self.base_url}/chat/stream",
+                f"{self.base_url}/chat",
                 json=payload,
                 headers={"Content-Type": "application/json"},
                 stream=True

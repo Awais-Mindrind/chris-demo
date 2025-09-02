@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.db import get_db
-from app.agent import get_agent_for_session, process_message, process_message_stream, get_conversation_history, clear_conversation, get_session_stats
+from app.agent import get_agent_for_session, process_message_non_streaming, process_message_stream, get_conversation_history, clear_conversation, get_session_stats
 from app.crud import create_quote, get_quote, check_idempotency_key
 from app.pdf import generate_quote_pdf
 from app.schemas import (
@@ -114,15 +114,12 @@ async def health_check():
     }
 
 
+
 @app.post("/chat")
-async def chat_endpoint(
-    request: ChatRequest,
-    db: Session = Depends(get_db),
-    http_request: Request = None
-):
-    """Chat endpoint for AI agent interaction."""
+async def chat_endpoint(request: ChatRequest, db: Session = Depends(get_db), http_request: Request = None):
+    """Chat endpoint with non-streaming approach and enhanced session management."""
     start_time = time.time()
-    trace_id = getattr(http_request.state, 'trace_id', 'unknown') if http_request else 'unknown'
+    trace_id = getattr(http_request.state, 'trace_id', 'unknown')
     
     log_endpoint_request("/chat", "POST", trace_id, message_length=len(request.message))
     
@@ -135,13 +132,27 @@ async def chat_endpoint(
         else:
             log_session_retrieved(session_id, trace_id)
         
-        # Process message with agent
-        response = process_message(session_id, request.message, db)
+        # Process message with non-streaming agent (includes full chat history)
+        result = process_message_non_streaming(session_id, request.message, db)
         
-        response_data = ChatResponse(
-            response=response,
-            session_id=session_id
-        )
+        # Prepare response data
+        response_data = {
+            "response": result["response"],
+            "session_id": result["session_id"],
+            "success": result["success"]
+        }
+        
+        # Add quote data if available
+        if result.get("quote_data"):
+            response_data["quote_data"] = result["quote_data"]
+        
+        # Add PDF URL if available
+        if result.get("pdf_url"):
+            response_data["pdf_url"] = result["pdf_url"]
+        
+        # Add error information if present
+        if not result["success"] and result.get("error"):
+            response_data["error"] = result["error"]
         
         latency_ms = (time.time() - start_time) * 1000
         log_endpoint_response("/chat", "POST", trace_id, 200, latency_ms, session_id=session_id)
@@ -157,76 +168,6 @@ async def chat_endpoint(
             status_code=500,
             detail=f"Error processing chat message: {str(e)}"
         )
-
-
-@app.post("/chat/stream")
-async def chat_stream(request: ChatRequest, db: Session = Depends(get_db), http_request: Request = None):
-    """Chat endpoint with Server-Sent Events streaming."""
-    start_time = time.time()
-    trace_id = getattr(http_request.state, 'trace_id', 'unknown')
-    
-    log_endpoint_request("/chat/stream", "POST", trace_id, message_length=len(request.message))
-    
-    # Generate session ID if not provided
-    session_id = request.session_id or generate_session_id()
-    
-    if not request.session_id:
-        log_session_created(session_id, trace_id)
-    else:
-        log_session_retrieved(session_id, trace_id)
-    
-    log_streaming_started(session_id, trace_id)
-    
-    async def generate_stream():
-        """Generate SSE stream with real LLM streaming."""
-        try:
-            # Send session ID
-            yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
-            
-            # Process message with streaming agent
-            async for chunk in process_message_stream(session_id, request.message, db):
-                if chunk["type"] == "token":
-                    # Stream individual tokens
-                    yield f"event: token\ndata: {json.dumps({'chunk': chunk['content'], 'partial': chunk['partial']})}\n\n"
-                
-                elif chunk["type"] == "pdf_ready":
-                    # Send PDF ready notification
-                    yield f"event: pdf_ready\ndata: {json.dumps({'pdf_url': chunk['pdf_url'], 'quote_id': chunk['quote_id']})}\n\n"
-                
-                elif chunk["type"] == "done":
-                    # Send completion event
-                    done_data = {
-                        "response": chunk["response"],
-                        "session_id": chunk["session_id"]
-                    }
-                    if chunk.get("pdf_url"):
-                        done_data["pdf_url"] = chunk["pdf_url"]
-                    
-                    yield f"event: done\ndata: {json.dumps(done_data)}\n\n"
-            
-        except Exception as e:
-            error_data = {
-                "error": "Processing failed",
-                "message": str(e),
-                "session_id": session_id
-            }
-            yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
-            log_error(e, "chat_stream", trace_id, session_id=session_id)
-        finally:
-            latency_ms = (time.time() - start_time) * 1000
-            log_streaming_completed(session_id, trace_id, latency_ms=latency_ms)
-            log_endpoint_response("/chat/stream", "POST", trace_id, 200, latency_ms, session_id=session_id)
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
-        }
-    )
 
 
 @app.post("/actions/create_quote")

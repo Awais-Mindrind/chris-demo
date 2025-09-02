@@ -13,7 +13,7 @@
         <p>AI-powered sales quote creation system</p>
       </header>
 
-      <main>
+      <main class="main-layout">
         <div class="chat-section">
           <div id="transcript" class="transcript"></div>
 
@@ -25,12 +25,31 @@
           <div class="status" id="status">Ready</div>
         </div>
 
-        <div class="actions-section">
-          <h3>Quick Actions</h3>
-          <button onclick="createQuote()" class="action-btn">
-            Create Quote (direct)
-          </button>
-          <div id="quote-result" class="quote-result"></div>
+        <div class="sidebar">
+          <div class="quote-preview">
+            <h3>Quote Preview</h3>
+            <div id="quote-preview-content" class="quote-preview-content">
+              <p class="no-quote">No quote in progress</p>
+            </div>
+            <div id="quote-actions" class="quote-actions" style="display: none">
+              <button
+                id="download-pdf-btn"
+                class="pdf-btn"
+                onclick="downloadPDF()"
+                disabled
+              >
+                📄 Download PDF
+              </button>
+            </div>
+          </div>
+
+          <div class="actions-section">
+            <h3>Quick Actions</h3>
+            <button onclick="createQuote()" class="action-btn">
+              Create Quote (direct)
+            </button>
+            <div id="quote-result" class="quote-result"></div>
+          </div>
         </div>
       </main>
     </div>

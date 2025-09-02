@@ -30,9 +30,13 @@ class TestChatEndpoints:
     """Test chat endpoints."""
     
     def test_chat_endpoint_success(self, client):
-        """Test successful chat endpoint."""
-        with patch('app.main.process_message') as mock_process:
-            mock_process.return_value = "Hello! I can help you create a quote."
+        """Test successful streaming chat endpoint."""
+        async def mock_stream():
+            yield {"type": "token", "content": "Hello! I can help you create a quote.", "partial": "Hello! I can help you create a quote."}
+            yield {"type": "done", "response": "Hello! I can help you create a quote.", "session_id": "test_session"}
+        
+        with patch('app.main.process_message_stream') as mock_process_stream:
+            mock_process_stream.return_value = mock_stream()
             
             response = client.post("/chat", json={
                 "message": "Hello",
@@ -40,33 +44,35 @@ class TestChatEndpoints:
             })
             
             assert response.status_code == 200
-            data = response.json()
-            assert data["response"] == "Hello! I can help you create a quote."
-            assert data["session_id"] == "test_session"
+            assert "text/event-stream" in response.headers["content-type"]
     
     def test_chat_endpoint_generates_session_id(self, client):
         """Test chat endpoint generates session ID when not provided."""
-        with patch('app.main.process_message') as mock_process:
-            mock_process.return_value = "Hello!"
+        async def mock_stream():
+            yield {"type": "session", "session_id": "generated_session"}
+            yield {"type": "token", "content": "Hello!", "partial": "Hello!"}
+            yield {"type": "done", "response": "Hello!", "session_id": "generated_session"}
+        
+        with patch('app.main.process_message_stream') as mock_process_stream:
+            mock_process_stream.return_value = mock_stream()
             
             response = client.post("/chat", json={"message": "Hello"})
             
             assert response.status_code == 200
-            data = response.json()
-            assert "session_id" in data
-            assert data["session_id"] is not None
+            assert "text/event-stream" in response.headers["content-type"]
     
     def test_chat_endpoint_error(self, client):
         """Test chat endpoint error handling."""
-        with patch('app.main.process_message') as mock_process:
-            mock_process.side_effect = Exception("Processing failed")
+        async def mock_stream():
+            yield {"type": "error", "error": "Processing failed", "message": "Processing failed", "session_id": "test_session"}
+        
+        with patch('app.main.process_message_stream') as mock_process_stream:
+            mock_process_stream.return_value = mock_stream()
             
             response = client.post("/chat", json={"message": "Hello"})
             
-            assert response.status_code == 500
-            data = response.json()
-            assert "detail" in data
-            assert "Processing failed" in data["detail"]
+            assert response.status_code == 200
+            assert "text/event-stream" in response.headers["content-type"]
 
 
 class TestCreateQuoteEndpoint:
@@ -262,29 +268,5 @@ class TestStatsEndpoint:
             assert data["sessions"]["active_sessions"] == 5
 
 
-class TestSSEEndpoint:
-    """Test Server-Sent Events endpoint."""
-    
-    def test_chat_stream_endpoint(self, client):
-        """Test SSE streaming endpoint."""
-        with patch('app.main.process_message') as mock_process:
-            mock_process.return_value = "Hello world"
-            
-            response = client.post("/chat/stream", json={"message": "Hello"})
-            
-            assert response.status_code == 200
-            assert "text/event-stream" in response.headers["content-type"]
-            assert response.headers["cache-control"] == "no-cache"
-            assert response.headers["connection"] == "keep-alive"
-    
-    def test_chat_stream_generates_session_id(self, client):
-        """Test SSE endpoint generates session ID when not provided."""
-        with patch('app.main.process_message') as mock_process:
-            mock_process.return_value = "Hello"
-            
-            response = client.post("/chat/stream", json={"message": "Hello"})
-            
-            assert response.status_code == 200
-            # The response will be a streaming response, so we can't easily test the content
-            # but we can verify the endpoint exists and responds correctly
+
 

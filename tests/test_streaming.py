@@ -28,7 +28,7 @@ class TestStreamingEndpoints:
         
         mock_process_stream.return_value = mock_stream()
         
-        response = client.post("/chat/stream", json={"message": "Hello"})
+        response = client.post("/chat", json={"message": "Hello"})
         
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
@@ -47,7 +47,7 @@ class TestStreamingEndpoints:
         
         mock_process_stream.return_value = mock_stream()
         
-        response = client.post("/chat/stream", json={"message": "Create a quote"})
+        response = client.post("/chat", json={"message": "Create a quote"})
         
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
@@ -61,7 +61,7 @@ class TestStreamingEndpoints:
         
         mock_process_stream.return_value = mock_stream()
         
-        response = client.post("/chat/stream", json={"message": "Hello"})
+        response = client.post("/chat", json={"message": "Hello"})
         
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
@@ -76,7 +76,7 @@ class TestStreamingEndpoints:
             
             mock_process_stream.return_value = mock_stream()
             
-            response = client.post("/chat/stream", json={
+            response = client.post("/chat", json={
                 "message": "Hello",
                 "session_id": "provided_session"
             })
@@ -88,7 +88,7 @@ class TestStreamingEndpoints:
 class TestStreamingAgent:
     """Test the streaming agent functionality."""
     
-    @patch('app.agent.get_streaming_agent_for_session')
+    @patch('app.agent.get_agent_for_session')
     def test_process_message_stream_success(self, mock_get_agent):
         """Test successful message streaming."""
         # Mock agent
@@ -116,7 +116,7 @@ class TestStreamingAgent:
         # For now, we just test that the function can be imported and called
         assert process_message_stream is not None
     
-    @patch('app.agent.get_streaming_agent_for_session')
+    @patch('app.agent.get_agent_for_session')
     def test_process_message_stream_with_tools(self, mock_get_agent):
         """Test streaming with tool calls."""
         # Mock agent
@@ -136,7 +136,7 @@ class TestStreamingAgent:
         # Test that the function exists and can be called
         assert process_message_stream is not None
     
-    @patch('app.agent.get_streaming_agent_for_session')
+    @patch('app.agent.get_agent_for_session')
     def test_process_message_stream_error(self, mock_get_agent):
         """Test streaming error handling."""
         # Mock agent that raises an exception
@@ -152,22 +152,22 @@ class TestStreamingLLM:
     @patch('app.agent.settings')
     def test_create_streaming_llm(self, mock_settings):
         """Test streaming LLM creation."""
-        from app.agent import create_streaming_llm
+        from app.agent import create_llm
         
         mock_settings.google_api_key = "test_key"
         
         # Test that the function exists and can be called
-        assert create_streaming_llm is not None
+        assert create_llm is not None
     
     @patch('app.agent.settings')
     def test_create_streaming_agent(self, mock_settings):
         """Test streaming agent creation."""
-        from app.agent import create_streaming_agent
+        from app.agent import create_agent_with_db
         
         mock_settings.google_api_key = "test_key"
         
         # Test that the function exists and can be called
-        assert create_streaming_agent is not None
+        assert create_agent_with_db is not None
 
 
 class TestSSEEventFormat:

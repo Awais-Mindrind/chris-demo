@@ -203,6 +203,24 @@ def create_tools_with_db(db: Session) -> List[StructuredTool]:
                 # Handle field name mapping (quantity -> qty)
                 if 'quantity' in line:
                     line['qty'] = line.pop('quantity')
+                
+                # Handle SKU code to ID conversion
+                if 'sku_code' in line and 'sku_id' not in line:
+                    sku_code = line.pop('sku_code')
+                    # Find SKU by code in the specified pricebook
+                    skus = get_skus(db, code_filter=sku_code, pricebook_id=pricebook_id)
+                    if not skus:
+                        # Try to find in any pricebook for better error message
+                        all_skus = get_skus(db, code_filter=sku_code)
+                        if all_skus:
+                            sku = all_skus[0]
+                            pricebooks = {pb.id: pb.name for pb in get_pricebooks(db)}
+                            pb_name = pricebooks.get(sku.pricebook_id, f"Pricebook {sku.pricebook_id}")
+                            raise ValueError(f"SKU code '{sku_code}' exists in {pb_name}, not in the specified pricebook")
+                        else:
+                            raise ValueError(f"SKU code '{sku_code}' not found")
+                    line['sku_id'] = skus[0].id
+                
                 quote_lines.append(QuoteLineCreate(**line))
             
             # Create quote data

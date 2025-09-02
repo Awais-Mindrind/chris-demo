@@ -1,8 +1,10 @@
 // Minimal JavaScript for Quote Agent UI
 
 let currentSessionId = null;
+let currentQuote = null;
+let currentPdfUrl = null;
 
-// Send chat message with SSE streaming
+// Send chat message with non-streaming approach
 async function sendChat() {
   const msgInput = document.getElementById("msg");
   const message = msgInput.value.trim();
@@ -15,7 +17,15 @@ async function sendChat() {
   // Clear input and add user message
   msgInput.value = "";
   transcript.textContent += `User: ${message}\n\n`;
-  status.textContent = "Streaming...";
+  status.textContent = "Processing...";
+
+  // Add processing indicator
+  const processingIndicator = document.createElement("div");
+  processingIndicator.id = "processing-indicator";
+  processingIndicator.textContent = "🤖 AI is thinking...";
+  processingIndicator.style.cssText =
+    "color: #7f8c8d; font-style: italic; margin: 10px 0;";
+  transcript.appendChild(processingIndicator);
 
   try {
     const response = await fetch("/chat", {
@@ -33,82 +43,51 @@ async function sendChat() {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let currentResponse = "";
+    const data = await response.json();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Process SSE lines
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        if (line.startsWith("event:")) {
-          const eventType = line.slice(6).trim();
-
-          if (eventType === "token") {
-            // Get next line for data
-            const dataLine = lines[lines.indexOf(line) + 1];
-            if (dataLine && dataLine.startsWith("data:")) {
-              try {
-                const data = JSON.parse(dataLine.slice(5));
-                currentResponse += data.chunk || data.text || "";
-                transcript.textContent =
-                  transcript.textContent.replace(/Assistant:.*$/, "") +
-                  `Assistant: ${currentResponse}`;
-              } catch (e) {
-                // Fallback to raw data
-                currentResponse += dataLine.slice(5);
-                transcript.textContent =
-                  transcript.textContent.replace(/Assistant:.*$/, "") +
-                  `Assistant: ${currentResponse}`;
-              }
-            }
-          } else if (eventType === "done") {
-            const dataLine = lines[lines.indexOf(line) + 1];
-            if (dataLine && dataLine.startsWith("data:")) {
-              try {
-                const data = JSON.parse(dataLine.slice(5));
-                if (data.pdf_url) {
-                  transcript.textContent += `\n\n📄 <a href="${data.pdf_url}" target="_blank" class="pdf-link">View Quote PDF</a>\n`;
-                }
-                if (data.session_id) {
-                  currentSessionId = data.session_id;
-                }
-              } catch (e) {
-                console.error("Error parsing done event:", e);
-              }
-            }
-            status.textContent = "Ready";
-            return;
-          } else if (eventType === "error") {
-            const dataLine = lines[lines.indexOf(line) + 1];
-            if (dataLine && dataLine.startsWith("data:")) {
-              try {
-                const data = JSON.parse(dataLine.slice(5));
-                transcript.textContent += `\n\n❌ Error: ${
-                  data.message || "Unknown error"
-                }\n`;
-              } catch (e) {
-                transcript.textContent += `\n\n❌ Error: Failed to parse error message\n`;
-              }
-            }
-            status.textContent = "Error";
-            return;
-          }
-        }
-      }
+    // Remove processing indicator
+    const processingIndicator = document.getElementById("processing-indicator");
+    if (processingIndicator) {
+      processingIndicator.remove();
     }
 
-    status.textContent = "Ready";
+    // Update session ID if provided
+    if (data.session_id) {
+      currentSessionId = data.session_id;
+    }
+
+    // Add assistant response to transcript
+    transcript.textContent += `Assistant: ${data.response}\n\n`;
+
+    // Handle quote data if available
+    if (data.quote_data) {
+      updateQuotePreview(data.quote_data);
+      transcript.textContent += `\n📊 Quote preview updated in sidebar\n`;
+    }
+
+    // Handle PDF URL if available
+    if (data.pdf_url) {
+      currentPdfUrl = data.pdf_url;
+      updateQuoteActions(true);
+      transcript.textContent += `\n\n📄 <a href="${data.pdf_url}" target="_blank" class="pdf-link">View Quote PDF</a>\n`;
+    }
+
+    // Handle errors
+    if (!data.success && data.error) {
+      transcript.textContent += `\n\n❌ Error: ${data.error}\n`;
+      status.textContent = "Error";
+    } else {
+      status.textContent = "Ready";
+    }
   } catch (error) {
     console.error("Chat error:", error);
+
+    // Remove processing indicator
+    const processingIndicator = document.getElementById("processing-indicator");
+    if (processingIndicator) {
+      processingIndicator.remove();
+    }
+
     transcript.textContent += `\n\n❌ Error: ${error.message}\n`;
     status.textContent = "Error";
   }
@@ -159,6 +138,158 @@ async function createQuote() {
   }
 }
 
+// Quote preview functions
+function updateQuotePreview(quoteData) {
+  const previewContent = document.getElementById("quote-preview-content");
+
+  if (!quoteData) {
+    previewContent.innerHTML = '<p class="no-quote">No quote in progress</p>';
+    updateQuoteActions(false);
+    return;
+  }
+
+  let html = `
+    <div class="quote-info">
+      <h4>Quote #${quoteData.id || "Draft"}</h4>
+      <p><strong>Account:</strong> ${
+        quoteData.account_name || "Not specified"
+      }</p>
+      <p><strong>Status:</strong> ${quoteData.status || "Draft"}</p>
+      <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+    </div>
+  `;
+
+  if (quoteData.lines && quoteData.lines.length > 0) {
+    html += `
+      <div class="quote-lines">
+        <h5>Line Items</h5>
+    `;
+
+    quoteData.lines.forEach((line) => {
+      const lineTotal = (
+        line.qty *
+        line.unit_price *
+        (1 - (line.discount_pct || 0))
+      ).toFixed(2);
+      html += `
+        <div class="quote-line">
+          <span>${line.sku_name || line.sku_code} (×${line.qty})</span>
+          <span>$${lineTotal}</span>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+
+    const subtotal = quoteData.lines.reduce((sum, line) => {
+      return sum + line.qty * line.unit_price * (1 - (line.discount_pct || 0));
+    }, 0);
+
+    html += `
+      <div class="quote-total">
+        <div class="quote-line">
+          <span>Subtotal:</span>
+          <span>$${subtotal.toFixed(2)}</span>
+        </div>
+        <div class="quote-line">
+          <span>Total:</span>
+          <span>$${subtotal.toFixed(2)}</span>
+        </div>
+      </div>
+    `;
+  } else {
+    html += '<p class="no-quote">No line items added yet</p>';
+  }
+
+  previewContent.innerHTML = html;
+  currentQuote = quoteData;
+}
+
+function updateQuoteActions(hasPdf) {
+  const quoteActions = document.getElementById("quote-actions");
+  const downloadBtn = document.getElementById("download-pdf-btn");
+
+  if (hasPdf && currentPdfUrl) {
+    quoteActions.style.display = "block";
+    downloadBtn.disabled = false;
+  } else {
+    quoteActions.style.display = "none";
+    downloadBtn.disabled = true;
+  }
+}
+
+function downloadPDF() {
+  if (currentPdfUrl) {
+    window.open(currentPdfUrl, "_blank");
+  }
+}
+
+// Parse quote information from agent responses
+function parseQuoteFromResponse(response) {
+  // Look for quote-related information in the response
+  const quotePatterns = [
+    /quote\s*#?(\d+)/i,
+    /account[:\s]+([^,\n]+)/i,
+    /sku[:\s]+([^,\n]+)/i,
+    /quantity[:\s]+(\d+)/i,
+    /price[:\s]+\$?([\d,]+\.?\d*)/i,
+  ];
+
+  // This is a simple parser - in a real implementation, you might want to
+  // extract more structured data from the agent's response
+  const accountMatch = response.match(/account[:\s]+([^,\n]+)/i);
+  const skuMatch = response.match(/sku[:\s]+([^,\n]+)/i);
+  const qtyMatch = response.match(/quantity[:\s]+(\d+)/i);
+
+  if (accountMatch || skuMatch || qtyMatch) {
+    return {
+      account_name: accountMatch ? accountMatch[1].trim() : null,
+      lines:
+        skuMatch && qtyMatch
+          ? [
+              {
+                sku_name: skuMatch[1].trim(),
+                qty: parseInt(qtyMatch[1]),
+                unit_price: 0, // Would need to be fetched from backend
+                discount_pct: 0,
+              },
+            ]
+          : [],
+    };
+  }
+
+  return null;
+}
+
+// Test function to demonstrate quote preview
+function testQuotePreview() {
+  const testQuote = {
+    id: 123,
+    status: "Draft",
+    account_name: "Acme Ltd",
+    lines: [
+      {
+        sku_name: "Widget",
+        sku_code: "WID-001",
+        qty: 5,
+        unit_price: 10.0,
+        discount_pct: 0,
+      },
+      {
+        sku_name: "Gadget",
+        sku_code: "GAD-002",
+        qty: 2,
+        unit_price: 25.0,
+        discount_pct: 0.1,
+      },
+    ],
+  };
+
+  updateQuotePreview(testQuote);
+  currentPdfUrl = "/quotes/123/pdf";
+  updateQuoteActions(true);
+}
+
 // Handle Enter key in message input
 document.addEventListener("DOMContentLoaded", function () {
   const msgInput = document.getElementById("msg");
@@ -167,4 +298,19 @@ document.addEventListener("DOMContentLoaded", function () {
       sendChat();
     }
   });
+
+  // Initialize quote preview
+  updateQuotePreview(null);
+
+  // Add test button for demo purposes
+  const testBtn = document.createElement("button");
+  testBtn.textContent = "Test Quote Preview";
+  testBtn.onclick = testQuotePreview;
+  testBtn.style.marginTop = "10px";
+  testBtn.style.background = "#9b59b6";
+  testBtn.onmouseover = () => (testBtn.style.background = "#8e44ad");
+  testBtn.onmouseout = () => (testBtn.style.background = "#9b59b6");
+
+  const actionsSection = document.querySelector(".actions-section");
+  actionsSection.appendChild(testBtn);
 });

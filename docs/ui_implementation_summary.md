@@ -36,12 +36,12 @@
 
 #### UI Server Endpoints (port 8001):
 - `GET /` - Render chat page
-- `POST /chat` - Proxy to backend `/chat/stream` with SSE
+- `POST /chat` - Proxy to backend `/chat` with SSE
 - `POST /actions/create_quote` - Proxy to backend quote creation
 - `GET /quotes/{id}/pdf` - Redirect to backend PDF endpoint
 
 #### Backend Endpoints (port 8000):
-- `POST /chat/stream` - SSE streaming chat endpoint
+- `POST /chat` - SSE streaming chat endpoint
 - `POST /actions/create_quote` - Quote creation with idempotency
 - `GET /quotes/{id}/pdf` - PDF file download
 

@@ -162,7 +162,7 @@ def test_stats_endpoint():
 
 def test_sse_endpoint():
     """Test SSE streaming endpoint."""
-    response = client.post("/chat/stream", json={"message": "Hello"})
+    response = client.post("/chat", json={"message": "Hello"})
     assert response.status_code == 200
     assert "text/event-stream" in response.headers["content-type"]
 
@@ -267,7 +267,7 @@ def test_chat_stream_happy_path_integration(mock_get_db, test_db):
     mock_get_db.return_value = test_db['session']
     
     # Test streaming chat with valid request
-    response = client.post("/chat/stream", json={
+    response = client.post("/chat", json={
         "message": "Hello, I need help with pricing"
     })
     
@@ -293,7 +293,7 @@ def test_chat_stream_ambiguous_account_integration(mock_get_db, test_db):
     mock_get_db.return_value = test_db['session']
     
     # Test streaming chat with ambiguous account
-    response = client.post("/chat/stream", json={
+    response = client.post("/chat", json={
         "message": "I want to create a quote for Test Company"
     })
     

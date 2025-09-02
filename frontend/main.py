@@ -38,16 +38,42 @@ async def proxy_chat(request: Request):
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:  # 120 second timeout for slow API responses
                 # Forward request to backend
-                async with client.stream(
-                    "POST",
-                    f"{BACKEND_BASE}/chat/stream",
+                # Make non-streaming request to backend
+                response = await client.post(
+                    f"{BACKEND_BASE}/chat",
                     json=body,
-                    headers={"Accept": "text/event-stream"},
+                    headers={"Content-Type": "application/json"},
                     timeout=120.0
-                ) as response:
-                    # Stream chunks to browser
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
+                )
+                
+                if response.status_code != 200:
+                    yield f"event: error\ndata: {json.dumps({'error': f'Backend error: {response.status_code}'})}\n\n"
+                    return
+                
+                # Get the response data
+                data = response.json()
+                
+                # Send session event
+                yield f"event: session\ndata: {json.dumps({'session_id': data.get('session_id')})}\n\n"
+                
+                # Send response as a single token event
+                yield f"event: token\ndata: {json.dumps({'chunk': data.get('response', ''), 'partial': data.get('response', '')})}\n\n"
+                
+                # Send quote data if available
+                if data.get('quote_data'):
+                    yield f"event: quote_created\ndata: {json.dumps({'quote_id': data['quote_data'].get('id'), 'pdf_url': data.get('pdf_url'), 'quote_data': data['quote_data']})}\n\n"
+                elif data.get('pdf_url'):
+                    yield f"event: pdf_ready\ndata: {json.dumps({'pdf_url': data['pdf_url'], 'quote_id': data.get('quote_id')})}\n\n"
+                
+                # Send completion event
+                done_data = {
+                    "response": data.get('response', ''),
+                    "session_id": data.get('session_id')
+                }
+                if data.get('pdf_url'):
+                    done_data["pdf_url"] = data['pdf_url']
+                
+                yield f"event: done\ndata: {json.dumps(done_data)}\n\n"
         except httpx.TimeoutException:
             # Handle timeout gracefully
             error_data = {

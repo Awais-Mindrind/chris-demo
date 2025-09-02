@@ -4,7 +4,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.tools import BaseTool
 from langchain.memory import ConversationBufferMemory
 from sqlalchemy.orm import Session
 from app.config import settings
@@ -74,7 +73,7 @@ session_store = None
 
 
 def create_llm() -> ChatGoogleGenerativeAI:
-    """Create and configure the Google GenAI LLM."""
+    """Create and configure the Google GenAI LLM with streaming support."""
     if not settings.google_api_key:
         raise ValueError("GOOGLE_API_KEY must be set in environment variables")
     
@@ -83,20 +82,6 @@ def create_llm() -> ChatGoogleGenerativeAI:
         temperature=0.3,  # As specified in project rules (0.2-0.4)
         google_api_key=settings.google_api_key,
         convert_system_message_to_human=True,  # Gemini works better with human messages
-        verbose=True
-    )
-
-
-def create_streaming_llm() -> ChatGoogleGenerativeAI:
-    """Create and configure the Google GenAI LLM with streaming support."""
-    if not settings.google_api_key:
-        raise ValueError("GOOGLE_API_KEY must be set in environment variables")
-    
-    return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
-        temperature=0.3,
-        google_api_key=settings.google_api_key,
-        convert_system_message_to_human=True,
         streaming=True,  # Enable streaming
         verbose=True
     )
@@ -143,6 +128,12 @@ Available Tools:
 - get_quote: Retrieve quote details
 - render_quote_pdf: Generate PDF for quote
 
+IMPORTANT - Quote Creation:
+- When creating quotes, use sku_id (not sku_code) in line items
+- If you only have sku_code, use list_skus first to get the sku_id
+- Always specify the correct pricebook_id for the quote
+- The create_quote tool will automatically convert sku_code to sku_id if needed
+
 Remember: Be helpful, efficient, and always use the appropriate tools. If you have enough information to create a quote, do so automatically. Pay special attention to SKU-pricebook relationships to avoid validation errors."""
 
 
@@ -157,7 +148,7 @@ def create_agent_prompt() -> ChatPromptTemplate:
 
 
 def create_agent_with_db(db: Session) -> AgentExecutor:
-    """Create a LangChain agent with tools that have database session."""
+    """Create a LangChain agent with streaming support and database session."""
     from app.tools import create_tools_with_db
     
     print(f"DEBUG: Creating agent with database session: {db}")
@@ -167,25 +158,6 @@ def create_agent_with_db(db: Session) -> AgentExecutor:
     for tool in tools:
         print(f"DEBUG: Tool: {tool.name} - {tool.description}")
     
-    prompt = create_agent_prompt()
-    
-    agent = create_openai_tools_agent(llm, tools, prompt)
-    
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        handle_parsing_errors=True,
-        max_iterations=10
-    )
-
-
-def create_streaming_agent_with_db(db: Session) -> AgentExecutor:
-    """Create a LangChain agent with streaming support and database session."""
-    from app.tools import create_tools_with_db
-    
-    llm = create_streaming_llm()
-    tools = create_tools_with_db(db)
     prompt = create_agent_prompt()
     
     agent = create_openai_tools_agent(llm, tools, prompt)
@@ -214,23 +186,8 @@ def get_agent_for_session(session_id: str, db: Session) -> AgentExecutor:
     return agent
 
 
-def get_streaming_agent_for_session(session_id: str, db: Session) -> AgentExecutor:
-    """Get or create a streaming agent for a specific session with memory and database session."""
-    # Create persistent session store with database
-    persistent_store = PersistentSessionStore(db)
-    
-    # Create streaming agent with memory and database session
-    agent = create_streaming_agent_with_db(db)
-    
-    # Add memory to the agent
-    memory = persistent_store.get_session(session_id)
-    agent.memory = memory
-    
-    return agent
-
-
-def process_message(session_id: str, message: str, db: Session) -> str:
-    """Process a user message with the agent.
+def process_message_non_streaming(session_id: str, message: str, db: Session) -> Dict[str, Any]:
+    """Process a user message with the agent using non-streaming approach.
     
     Args:
         session_id: Session identifier for conversation memory
@@ -238,7 +195,7 @@ def process_message(session_id: str, message: str, db: Session) -> str:
         db: Database session
         
     Returns:
-        Agent's response
+        Dictionary with response, quote_data (if created), and metadata
     """
     try:
         # Create persistent session store
@@ -250,18 +207,72 @@ def process_message(session_id: str, message: str, db: Session) -> str:
         # Get or create agent for this session with database session
         agent = get_agent_for_session(session_id, db)
         
-        # Process the message
+        # Process the message with full context
         response = agent.invoke({
             "input": message,
             "chat_history": agent.memory.chat_memory.messages if agent.memory else []
         })
         
-        # Save assistant response to database
+        # Extract response text
         response_text = response.get("output", "I apologize, but I encountered an error processing your request.")
+        
+        # Check if any tools were called that might have created a quote
+        quote_data = None
+        pdf_url = None
+        
+        if "intermediate_steps" in response:
+            for step in response["intermediate_steps"]:
+                if len(step) >= 2:
+                    tool_name = step[0].tool if hasattr(step[0], 'tool') else str(step[0])
+                    tool_result = step[1]
+                    
+                    logger.info(f"Tool called: {tool_name}, Result: {tool_result}")
+                    
+                    # Check if create_quote was called
+                    if "create_quote" in str(tool_name).lower():
+                        try:
+                            # Extract quote ID from result
+                            if isinstance(tool_result, dict) and "quote_id" in tool_result:
+                                quote_id = tool_result["quote_id"]
+                                pdf_url = f"/quotes/{quote_id}/pdf"
+                                
+                                # Get full quote data for preview
+                                from app.crud import get_quote
+                                quote_obj = get_quote(db, quote_id)
+                                
+                                if quote_obj:
+                                    # Convert quote data to frontend format
+                                    quote_data = {
+                                        "id": quote_obj.id,
+                                        "status": quote_obj.status,
+                                        "account_name": getattr(quote_obj.account, 'name', 'Unknown') if hasattr(quote_obj, 'account') else 'Unknown',
+                                        "lines": []
+                                    }
+                                    
+                                    # Add line items
+                                    for line in quote_obj.lines:
+                                        quote_data["lines"].append({
+                                            "sku_name": getattr(line.sku, 'name', f"SKU {line.sku_id}") if hasattr(line, 'sku') else f"SKU {line.sku_id}",
+                                            "sku_code": getattr(line.sku, 'code', f"SKU-{line.sku_id}") if hasattr(line, 'sku') else f"SKU-{line.sku_id}",
+                                            "qty": line.qty,
+                                            "unit_price": float(line.unit_price) if line.unit_price else 0,
+                                            "discount_pct": line.discount_pct or 0
+                                        })
+                        except Exception as e:
+                            logger.error(f"Error extracting quote data: {str(e)}")
+        
+        # Save assistant response to database
         persistent_store.save_message(session_id, "assistant", response_text)
         
         logger.info(f"Processed message for session {session_id}")
-        return response_text
+        
+        return {
+            "response": response_text,
+            "session_id": session_id,
+            "quote_data": quote_data,
+            "pdf_url": pdf_url,
+            "success": True
+        }
         
     except Exception as e:
         logger.error(f"Error processing message for session {session_id}: {str(e)}")
@@ -274,7 +285,15 @@ def process_message(session_id: str, message: str, db: Session) -> str:
         except Exception:
             pass
         
-        return error_msg
+        return {
+            "response": error_msg,
+            "session_id": session_id,
+            "quote_data": None,
+            "pdf_url": None,
+            "success": False,
+            "error": str(e)
+        }
+
 
 
 async def process_message_stream(session_id: str, message: str, db: Session) -> AsyncGenerator[Dict[str, Any], None]:
@@ -295,8 +314,8 @@ async def process_message_stream(session_id: str, message: str, db: Session) -> 
         # Save user message to database
         persistent_store.save_message(session_id, "user", message)
         
-        # Get or create streaming agent for this session with database session
-        agent = get_streaming_agent_for_session(session_id, db)
+        # Get or create agent for this session with database session
+        agent = get_agent_for_session(session_id, db)
         
         # Process the message with streaming
         response_stream = agent.astream({
@@ -332,12 +351,14 @@ async def process_message_stream(session_id: str, message: str, db: Session) -> 
                         "partial": full_response
                     }
             
-            # Check if any tools were called that might generate a PDF
+            # Check if any tools were called that might generate a PDF or quote data
             if "intermediate_steps" in chunk:
                 for step in chunk["intermediate_steps"]:
                     if len(step) >= 2:
                         tool_name = step[0].tool if hasattr(step[0], 'tool') else str(step[0])
                         tool_result = step[1]
+                        
+                        logger.info(f"Tool called: {tool_name}, Result: {tool_result}")
                         
                         # Check if create_quote was called
                         if "create_quote" in str(tool_name).lower():
@@ -346,13 +367,53 @@ async def process_message_stream(session_id: str, message: str, db: Session) -> 
                                 if isinstance(tool_result, dict) and "quote_id" in tool_result:
                                     quote_id = tool_result["quote_id"]
                                     pdf_url = f"/quotes/{quote_id}/pdf"
+                                    
+                                    # Get full quote data for preview
+                                    from app.crud import get_quote
+                                    quote_data = get_quote(db, quote_id)
+                                    
+                                    if quote_data:
+                                        # Convert quote data to frontend format
+                                        quote_preview = {
+                                            "id": quote_data.id,
+                                            "status": quote_data.status,
+                                            "account_name": getattr(quote_data.account, 'name', 'Unknown') if hasattr(quote_data, 'account') else 'Unknown',
+                                            "lines": []
+                                        }
+                                        
+                                        # Add line items
+                                        for line in quote_data.lines:
+                                            quote_preview["lines"].append({
+                                                "sku_name": getattr(line.sku, 'name', f"SKU {line.sku_id}") if hasattr(line, 'sku') else f"SKU {line.sku_id}",
+                                                "sku_code": getattr(line.sku, 'code', f"SKU-{line.sku_id}") if hasattr(line, 'sku') else f"SKU-{line.sku_id}",
+                                                "qty": line.qty,
+                                                "unit_price": float(line.unit_price) if line.unit_price else 0,
+                                                "discount_pct": line.discount_pct or 0
+                                            })
+                                        
+                                        yield {
+                                            "type": "quote_created",
+                                            "quote_id": quote_id,
+                                            "pdf_url": pdf_url,
+                                            "quote_data": quote_preview
+                                        }
+                                    else:
+                                        yield {
+                                            "type": "pdf_ready",
+                                            "pdf_url": pdf_url,
+                                            "quote_id": quote_id
+                                        }
+                            except Exception as e:
+                                logger.error(f"Error extracting quote data: {str(e)}")
+                                # Fallback to simple PDF notification
+                                if isinstance(tool_result, dict) and "quote_id" in tool_result:
+                                    quote_id = tool_result["quote_id"]
+                                    pdf_url = f"/quotes/{quote_id}/pdf"
                                     yield {
                                         "type": "pdf_ready",
                                         "pdf_url": pdf_url,
                                         "quote_id": quote_id
                                     }
-                            except Exception as e:
-                                logger.error(f"Error extracting PDF URL: {str(e)}")
         
         # Save assistant response to database
         persistent_store.save_message(session_id, "assistant", full_response)
@@ -445,17 +506,11 @@ def cleanup_sessions():
     session_store.cleanup_old_sessions()
 
 
-# Convenience function for backward compatibility
-def create_agent_simple() -> AgentExecutor:
-    """Create a simple agent without session memory (for testing)."""
-    return create_agent()
-
-
 # Export main functions
 __all__ = [
-    "create_agent",
+    "create_agent_with_db",
     "get_agent_for_session", 
-    "process_message",
+    "process_message_non_streaming",
     "process_message_stream",
     "get_conversation_history",
     "clear_conversation",
